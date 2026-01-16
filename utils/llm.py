@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 # 1. Setup
 load_dotenv()
 HF_TOKEN = os.getenv("HF_API_KEY") 
-MODEL = "google/gemma-2-2b-it" 
+MODEL = "Qwen/Qwen2.5-7B-Instruct" 
 
 # Use the V1 Router endpoint (OpenAI Compatible)
 API_URL = "https://router.huggingface.co/v1/chat/completions"
