@@ -118,19 +118,32 @@ Requirements:
 """.strip()
 
 
-def _teacher_summary_prompt(lesson_title: str, evidence: str) -> str:
+def _teacher_summary_prompt(lesson_title: str, evidence: str, previous_content: str = "") -> str:
+    previous_context = ""
+    if previous_content:
+        previous_context = f"""
+CONTEXT FROM PREVIOUS LESSONS:
+{previous_content}
+
+CRITICAL: The above content was already covered in previous lessons. 
+DO NOT repeat these topics, facts, or concepts. Build upon them and introduce NEW information.
+Reference previous lessons briefly if needed for continuity, but focus on ORIGINAL content.
+
+"""
+    
     return f"""
 You are an expert history teacher writing a comprehensive "Teacher's Guide" for: "{lesson_title}".
 
 This guide will be saved as a Word document and accompanies a 30-slide PowerPoint presentation.
 The guide must contain ALL the detailed knowledge the teacher needs, written as CONTINUOUS FLOWING TEXT.
 
-IMPORTANT STRUCTURAL REQUIREMENTS:
+{previous_context}IMPORTANT STRUCTURAL REQUIREMENTS:
 1. Write in continuous paragraphs (NOT bullet points or lists)
 2. Organize content into EXACTLY 30 logical sections (one per slide)
 3. Each section should be 3-5 sentences that expand on one key concept
 4. Start each section with a clear topic sentence that could serve as a slide title
 5. Use academic, clear language - NO poetic or "dreamy" phrasing
+6. Ensure all content is NEW and does not repeat what was covered before
 
 Format:
 [Section 1 topic]
@@ -146,14 +159,25 @@ EVIDENCE:
 """.strip()
 
 
-def _slide_generation_prompt(lesson_title: str, teacher_summary: str, target_slide_count: int) -> str:
+def _slide_generation_prompt(lesson_title: str, teacher_summary: str, target_slide_count: int, previous_slide_titles: List[str] = None) -> str:
+    previous_context = ""
+    if previous_slide_titles:
+        previous_context = f"""
+SLIDE TITLES FROM PREVIOUS LESSONS:
+{chr(10).join(f'- {title}' for title in previous_slide_titles)}
+
+CRITICAL: Avoid creating slides with similar titles or covering the same topics.
+Your slides must introduce NEW concepts and information.
+
+"""
+    
     return f"""
 You are an instructional designer. Create a PowerPoint structure for: "{lesson_title}".
 Target length: EXACTLY {target_slide_count} slides.
 
 The Teacher's Guide is organized into {target_slide_count} sections. Create ONE SLIDE PER SECTION.
 
-Return STRICT JSON:
+{previous_context}Return STRICT JSON:
 {{
   "slides": [
     {{
@@ -171,6 +195,7 @@ MANDATORY RULES:
 5. Maintain the EXACT order of sections from the guide
 6. Slide titles must be concrete and factual (e.g., "Economic Crisis 1789")
 7. You MUST generate EXACTLY {target_slide_count} slides - no more, no less
+8. Ensure content is unique and does not duplicate previous lessons
 
 TEACHER'S GUIDE:
 {teacher_summary}
@@ -181,7 +206,11 @@ TEACHER'S GUIDE:
 #  WORKFLOW STEPS
 # -------------------------------------------------------------------------
 
-async def _gather_evidence(topics: List[str]) -> str:
+async def _gather_evidence(topics: List[str], evidence_cache: Dict[str, str]) -> str:
+    """
+    Gathers evidence for topics, using cache to avoid duplicate research.
+    Updates the evidence_cache with newly researched topics.
+    """
     evidence_parts = []
     unique_topics = []
     seen = set()
@@ -194,17 +223,29 @@ async def _gather_evidence(topics: List[str]) -> str:
     unique_topics = unique_topics[:MAX_WIKI_TOPICS]
 
     for topic in unique_topics:
+        # Check cache first
+        cache_key = topic.lower()
+        if cache_key in evidence_cache:
+            print(f"[Planner] Using cached evidence for: {topic}")
+            evidence_parts.append(f"--- article: {topic} (cached) ---\n{evidence_cache[cache_key]}\n")
+            continue
+            
+        # Research if not cached
         print(f"[Planner] Researching: {topic}")
         step_cmd = f"TOOL:wikipedia:{topic}"
         result = await worker_agent(step_cmd)
+        
+        # Store in cache
+        evidence_cache[cache_key] = result
         evidence_parts.append(f"--- article: {topic} ---\n{result}\n")
     
     return "\n".join(evidence_parts)
 
 
-async def _process_lesson(lesson_info: Dict[str, Any], unit_title: str) -> Dict[str, Any]:
+async def _process_lesson(lesson_info: Dict[str, Any], unit_title: str, shared_context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handles end-to-end generation for a single lesson.
+    Uses shared_context to avoid repetition across lessons.
     Returns a dict with lesson details and file paths.
     """
     l_num = lesson_info.get("lesson_number", "?")
@@ -215,24 +256,38 @@ async def _process_lesson(lesson_info: Dict[str, Any], unit_title: str) -> Dict[
     full_lesson_name = f"Lesson {l_num} - {l_title}"
     print(f"\n[Planner] Processing {full_lesson_name}...")
 
-    # 1. Research
-    evidence = await _gather_evidence(topics)
+    # 1. Research (using shared evidence cache)
+    evidence = await _gather_evidence(topics, shared_context["evidence_cache"])
     if not evidence.strip():
         evidence = "No specific evidence found."
 
-    # 2. Write Teacher Summary (The Real Knowledge)
+    # 2. Write Teacher Summary (The Real Knowledge) - with context from previous lessons
     print(f"[Planner] Writing Teacher Guide for {full_lesson_name}...")
-    summary = generate(_teacher_summary_prompt(full_lesson_name, evidence), max_tokens=2000)
+    previous_summaries = "\n\n---PREVIOUS LESSON---\n\n".join(shared_context["lesson_summaries"])
+    summary = generate(
+        _teacher_summary_prompt(full_lesson_name, evidence, previous_summaries), 
+        max_tokens=2000
+    )
+    
+    # Add to shared context (keep last 2 lessons to avoid token overflow)
+    shared_context["lesson_summaries"].append(f"{full_lesson_name}:\n{summary[:1000]}...")
+    if len(shared_context["lesson_summaries"]) > 2:
+        shared_context["lesson_summaries"].pop(0)
     
     # 3. Create DOCX for Summary
     docx_filename = f"{_slugify_title(full_lesson_name)}.docx"
     docx_created = create_docx(docx_filename, full_lesson_name, summary)
     docx_path = OUTPUT_DIR / docx_filename if docx_created else None
 
-    # 4. Generate Slide Structure (Keywords only)
+    # 4. Generate Slide Structure (Keywords only) - with context from previous slides
     print(f"[Planner] Designing slides for {full_lesson_name}...")
     slides_json_str = generate(
-        _slide_generation_prompt(full_lesson_name, summary, SLIDE_TARGET),
+        _slide_generation_prompt(
+            full_lesson_name, 
+            summary, 
+            SLIDE_TARGET,
+            shared_context["slide_titles"]
+        ),
         max_tokens=2500,  
         temperature=0.3
     )
@@ -241,6 +296,10 @@ async def _process_lesson(lesson_info: Dict[str, Any], unit_title: str) -> Dict[
 
     if not slides_list:
         slides_list = [{"title": "Error generating slides", "bullets": ["Check logs."]}]
+    
+    # Track slide titles
+    for slide in slides_list:
+        shared_context["slide_titles"].append(slide.get("title", ""))
 
     # 5. Dispatch to PPT Agent
     ppt_filename = build_ppt_filename(full_lesson_name)
@@ -312,13 +371,20 @@ Default num_lessons to 1 if not specified.
         l_title = lesson.get("title", "Untitled")
         plan_summary += f"  {l_num}. {l_title}\n"
 
-    # 4. Execute Lessons
+    # 4. Initialize shared context to track what's been covered
+    shared_context = {
+        "evidence_cache": {},  # Cache Wikipedia results
+        "lesson_summaries": [],  # Track previous lesson content
+        "slide_titles": []  # Track all slide titles to avoid duplicates
+    }
+
+    # 5. Execute Lessons with shared context
     lesson_results = []
     for lesson in lessons:
-        lesson_data = await _process_lesson(lesson, unit_title)
+        lesson_data = await _process_lesson(lesson, unit_title, shared_context)
         lesson_results.append(lesson_data)
 
-    # 5. Format Discord Output
+    # 6. Format Discord Output
     output_lines = [
         f"**📝 Request:** {request}",
         "",
