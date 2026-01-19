@@ -1,4 +1,33 @@
 # agents/fact_checker_agent.py
+"""
+FACT-CHECKER AGENT
+==================
+RESPONSIBILITY: Validates content accuracy against source evidence.
+
+PURPOSE:
+- Ensures generated content is factually supported by research evidence
+- Provides quality assurance for historical accuracy
+- Prevents hallucinations and unsupported claims
+
+PROCESS:
+1. Receives text to verify (from Worker or Planner)
+2. Receives evidence (Wikipedia summaries, historical sources)
+3. Uses LLM to compare text against evidence
+4. Returns verdict: GO/NO-GO with confidence level
+5. Provides corrections when content is unsupported
+
+OUTPUT FORMAT:
+- GO/NO-GO verdict
+- Confidence level (High/Medium/Low)
+- Reason for verdict
+- Corrected version if needed
+
+USAGE:
+- Called during content generation pipeline
+- Ensures historical accuracy before final output
+- Currently integrated but can be used more extensively
+"""
+
 from utils.llm import generate
 
 async def fact_checker_agent(text_to_check: str, evidence: str) -> str:

@@ -1,4 +1,33 @@
 # agents/worker_agent.py
+"""
+WORKER AGENT
+============
+RESPONSIBILITY: Executes individual research and task steps.
+
+PURPOSE:
+- Handles tool execution (Wikipedia research, fact-checking)
+- Performs LLM-based task completion when tools aren't needed
+- Serves as the "hands" of the planner agent
+
+CAPABILITIES:
+1. Tool Execution:
+   - TOOL:wikipedia:<query> → Fetches Wikipedia summaries for historical research
+   - TOOL:factcheck:<claim>|||<evidence> → Validates claims against evidence
+
+2. LLM Tasks:
+   - Processes any non-tool step using the LLM
+   - Returns clear, concise answers
+
+USAGE:
+- Called by Planner agent for each research/task step
+- Operates synchronously with async wrapper
+- Returns results as strings for planner processing
+
+EXAMPLE TOOL CALLS:
+- "TOOL:wikipedia:French Revolution"
+- "TOOL:factcheck:Louis XVI was executed in 1793|||Evidence text here"
+"""
+
 from utils.llm import generate
 from utils.tools import wikipedia_summary, lightweight_factcheck
 import asyncio

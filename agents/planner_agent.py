@@ -1,3 +1,30 @@
+# agents/planner_agent.py
+"""
+PLANNER AGENT
+=============
+RESPONSIBILITY: Orchestrates the creation of comprehensive history lesson packages.
+
+PURPOSE:
+- Plans multi-lesson units on historical topics
+- Coordinates research, content generation, and file creation
+- Manages Worker, Fact-Checker, and PPT agents
+- Produces Teacher Guides (DOCX) and PowerPoint presentations
+
+FLOW:
+1. Receives validated history request from request_reviewer
+2. Creates lesson plan structure
+3. Coordinates research via Worker agent (Wikipedia)
+4. Generates detailed Teacher's Guide content
+5. Creates PowerPoint slide structures
+6. Dispatches to PPT agent for file generation
+7. Returns file paths to user
+
+GUARDRAILS:
+- Assumes all requests are pre-validated as history-related
+- Focuses strictly on historical education content
+- Uses evidence-based content generation
+"""
+
 import asyncio
 import json
 import re
@@ -96,8 +123,10 @@ def create_docx(filename: str, title: str, summary_text: str):
 
 def _plan_lessons_prompt(topic: str, num_lessons: int) -> str:
     return f"""
-You are an expert history teacher.
-Create a comprehensive {num_lessons}-lesson unit plan on: "{topic}".
+You are an expert history teacher creating educational content.
+
+**CRITICAL REQUIREMENT: This is a HISTORY education system.**
+You must create a comprehensive {num_lessons}-lesson unit plan on: "{topic}".
 
 Return STRICT JSON matching this schema:
 {{
@@ -111,10 +140,13 @@ Return STRICT JSON matching this schema:
   ]
 }}
 
-Requirements:
-- EXACTLY {num_lessons} lessons.
-- Lesson titles must be CONCRETE and FACTUAL (e.g. "The Storming of the Bastille", not "A Dream of Liberty").
-- Number the lessons sequentially.
+MANDATORY Requirements:
+- EXACTLY {num_lessons} lessons
+- HISTORY-FOCUSED: All lessons must cover historical events, periods, figures, or movements
+- Lesson titles must be CONCRETE and FACTUAL (e.g. "The Storming of the Bastille", not "A Dream of Liberty")
+- Number the lessons sequentially
+- Topics must be suitable for Wikipedia research on historical subjects
+- Maintain academic rigor appropriate for history education
 """.strip()
 
 
@@ -132,7 +164,8 @@ Reference previous lessons briefly if needed for continuity, but focus on ORIGIN
 """
     
     return f"""
-You are an expert history teacher writing a comprehensive "Teacher's Guide" for: "{lesson_title}".
+**SYSTEM GUARDRAIL: HISTORY EDUCATION ONLY**
+You are an expert HISTORY teacher writing a comprehensive "Teacher's Guide" for: "{lesson_title}".
 
 This guide will be saved as a Word document and accompanies a 30-slide PowerPoint presentation.
 The guide must contain ALL the detailed knowledge the teacher needs, written as CONTINUOUS FLOWING TEXT.
@@ -144,6 +177,13 @@ The guide must contain ALL the detailed knowledge the teacher needs, written as 
 4. Start each section with a clear topic sentence that could serve as a slide title
 5. Use academic, clear language - NO poetic or "dreamy" phrasing
 6. Ensure all content is NEW and does not repeat what was covered before
+
+**HISTORY GUARDRAILS:**
+- Focus EXCLUSIVELY on historical facts, events, and analysis
+- Base all content on the provided evidence from historical sources
+- Maintain chronological accuracy and historical context
+- Use proper historical terminology and period-appropriate references
+- Cite specific dates, figures, and locations where relevant
 
 Format:
 [Section 1 topic]
@@ -196,6 +236,12 @@ MANDATORY RULES:
 6. Slide titles must be concrete and factual (e.g., "Economic Crisis 1789")
 7. You MUST generate EXACTLY {target_slide_count} slides - no more, no less
 8. Ensure content is unique and does not duplicate previous lessons
+
+**HISTORY EDUCATION REQUIREMENTS:**
+- All slide content must be historically accurate and factual
+- Include specific dates, names, and locations in bullets
+- Focus on cause-effect relationships and historical significance
+- Maintain educational value appropriate for history teaching
 
 TEACHER'S GUIDE:
 {teacher_summary}

@@ -1,4 +1,36 @@
 # agents/ppt_agent.py
+"""
+PPT (POWERPOINT) AGENT
+======================
+RESPONSIBILITY: Generates PowerPoint presentation files.
+
+PURPOSE:
+- Converts slide structures into actual .pptx files
+- Handles file creation and saving to outputs directory
+- Operates asynchronously via message queue
+
+INPUT:
+- Receives messages from ppt_queue
+- Message payload contains:
+  * title: Main presentation title
+  * slides: List of slide objects with titles and bullets
+  * filename: Desired output filename
+
+OUTPUT:
+- Saves .pptx files to outputs/ directory
+- Notifies result_queue when complete
+
+SLIDE STRUCTURE:
+- Title slide (slide 0): Main title + subtitle
+- Content slides (slide 1 layout): Title + bullet points
+- Supports both new mode (slide objects) and legacy mode (bullet lists)
+
+USAGE:
+- Runs continuously as background task
+- Processes PPT generation requests from Planner
+- Does not interact directly with user
+"""
+
 import asyncio
 from pathlib import Path
 from pptx import Presentation

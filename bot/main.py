@@ -1,4 +1,23 @@
-# main.py
+# bot/main.py
+"""
+MAIN BOT ENTRY POINT
+====================
+Discord bot that interfaces with the agentic history education system.
+
+SYSTEM ARCHITECTURE:
+1. REQUEST REVIEWER AGENT: Validates requests are history-related
+2. PLANNER AGENT: Orchestrates lesson creation and coordinates other agents
+3. WORKER AGENT: Executes research tasks (Wikipedia, fact-checking)
+4. FACT-CHECKER AGENT: Validates content accuracy
+5. PPT AGENT: Generates PowerPoint files
+
+FLOW:
+ User Request → Request Reviewer → Planner → Worker/Fact-Checker → PPT → User
+
+GUARDRAILS:
+- Only history-related requests are processed
+- Non-history requests are rejected with helpful message
+"""
 
 import discord
 from discord.ext import commands
@@ -13,10 +32,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Import queues and planner
+# Import queues and agents
 from queues.message_bus import task_queue, result_queue
 from agents.planner_agent import planner_agent
 from agents.ppt_agent import ppt_agent
+from agents.request_reviewer_agent import review_request
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -103,8 +123,23 @@ def extract_files_from_response(text: str):
 
 @bot.tree.command(name="task", description="Send a task to the agent system")
 async def task_cmd(interaction: discord.Interaction, query: str):
+    """
+    Main command handler with request validation guardrail.
+    Only history-related requests are processed.
+    """
+    await interaction.response.send_message("🔍 Reviewing your request...")
 
-    await interaction.response.send_message("🧠 Processing your task...")
+    # STEP 1: Request Review (Guardrail)
+    review_result = await review_request(query)
+    
+    if not review_result["approved"]:
+        # Request rejected - not history-related
+        rejection_msg = review_result["message"]
+        await interaction.followup.send(rejection_msg)
+        return
+    
+    # STEP 2: Request approved - proceed with processing
+    await interaction.followup.send("✅ Request validated - Processing your history task...")
 
     final_result = await route_task(query)
 
