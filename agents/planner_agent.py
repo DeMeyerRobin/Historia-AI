@@ -41,6 +41,7 @@ from queues.message_bus import task_queue, result_queue, ppt_queue
 from utils.llm import generate
 from agents.worker_agent import run_worker_step as worker_agent
 from agents.fact_checker_agent import fact_checker_agent
+from agents.quizzer_agent import generate_quiz, format_quiz_for_docx
 
 
 OUTPUT_DIR = Path("outputs")
@@ -339,6 +340,9 @@ async def _process_lesson(lesson_info: Dict[str, Any], unit_title: str, shared_c
     if len(shared_context["lesson_summaries"]) > 2:
         shared_context["lesson_summaries"].pop(0)
     
+    # Store full summary for quiz generation
+    shared_context["full_summaries"].append(summary)
+    
     # 3. Create DOCX for Summary
     docx_filename = f"{_slugify_title(full_lesson_name)}.docx"
     docx_created = create_docx(docx_filename, full_lesson_name, summary)
@@ -408,9 +412,11 @@ async def _orchestrate_history_package(request: str):
     
     # 1. Parsing
     intent_prompt = f"""
-Extract topic and number of lessons from: "{request}".
-Return JSON: {{"topic": "...", "num_lessons": 3}}
+Extract topic, number of lessons, and student age from: "{request}".
+Return JSON: {{"topic": "...", "num_lessons": 3, "age": 16}}
 Default num_lessons to 1 if not specified.
+Default age to 16 if not specified.
+Age should be between 14 and 18.
 """.strip()
     
     intent_raw = await generate(intent_prompt)
@@ -420,6 +426,11 @@ Default num_lessons to 1 if not specified.
         num_lessons = int(intent.get("num_lessons", 1))
     except:
         num_lessons = 1
+    try:
+        age = int(intent.get("age", 16))
+        age = max(14, min(18, age))  # Clamp between 14-18
+    except:
+        age = 16
         
     print(f"[Planner] Plan: {num_lessons} lessons on '{topic}'")
 
@@ -443,8 +454,9 @@ Default num_lessons to 1 if not specified.
     # 4. Initialize shared context to track what's been covered
     shared_context = {
         "evidence_cache": {},  # Cache Wikipedia results
-        "lesson_summaries": [],  # Track previous lesson content
-        "slide_titles": []  # Track all slide titles to avoid duplicates
+        "lesson_summaries": [],  # Track previous lesson content (truncated)
+        "slide_titles": [],  # Track all slide titles to avoid duplicates
+        "full_summaries": []  # Full lesson summaries for quiz generation
     }
 
     # 5. Execute Lessons with shared context
@@ -453,7 +465,32 @@ Default num_lessons to 1 if not specified.
         lesson_data = await _process_lesson(lesson, unit_title, shared_context)
         lesson_results.append(lesson_data)
 
-    # 6. Format Discord Output
+    # 6. Generate Quiz
+    print(f"[Planner] Generating quiz for {age}-year-olds: {unit_title}")
+    quiz_data = await generate_quiz(unit_title, shared_context["full_summaries"], age)
+    quiz_text = format_quiz_for_docx(unit_title, quiz_data)
+    
+    # Save quiz to DOCX
+    quiz_filename = f"quiz_{_slugify_title(unit_title)}.docx"
+    quiz_path = None
+    if docx:
+        try:
+            doc = docx.Document()
+            doc.add_heading(f"Quiz: {unit_title}", 0)
+            doc.add_paragraph(f"Age Group: {age} years old")
+            doc.add_paragraph("")
+            
+            # Add questions
+            for i, q in enumerate(quiz_data.get("questions", []), 1):
+                doc.add_paragraph(f"{i}. {q}")
+            
+            quiz_path = OUTPUT_DIR / quiz_filename
+            doc.save(quiz_path)
+            print(f"[Planner] Quiz saved to: {quiz_path}")
+        except Exception as e:
+            print(f"[Planner] Error saving quiz: {e}")
+
+    # 7. Format Discord Output
     output_lines = [
         f"**📝 Request:** {request}",
         "",
@@ -471,6 +508,11 @@ Default num_lessons to 1 if not specified.
             output_lines.append(f"  __FILE__:{result['ppt_path']}")
         if result["docx_path"]:
             output_lines.append(f"  __FILE__:{result['docx_path']}")
+    
+    # Add quiz file
+    if quiz_path:
+        output_lines.append(f"- Quiz")
+        output_lines.append(f"  __FILE__:{str(quiz_path)}")
 
     return "\n".join(output_lines)
 
