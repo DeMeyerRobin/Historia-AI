@@ -16,7 +16,7 @@ preventing misuse and maintaining focus on educational history content.
 from utils.llm import generate
 
 
-def is_history_related(request: str) -> tuple[bool, str]:
+async def is_history_related(request: str) -> tuple[bool, str]:
     """
     Analyzes a user request to determine if it's history-related.
     
@@ -60,7 +60,7 @@ If the request mentions creating lessons, presentations, or studying a historica
 If it asks about non-history topics or current events, REJECT it.
 """.strip()
     
-    response = generate(prompt, temperature=0.2, max_tokens=150)
+    response = await generate(prompt, temperature=0.2, max_tokens=150)
     
     # Parse the response
     lines = response.strip().split('\n')
@@ -114,7 +114,7 @@ async def review_request(request: str) -> dict:
             - message: str
             - original_request: str
     """
-    is_valid, message = is_history_related(request)
+    is_valid, message = await is_history_related(request)
     
     return {
         "approved": is_valid,

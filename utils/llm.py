@@ -1,5 +1,6 @@
 import os
-import requests
+import aiohttp
+import asyncio
 from dotenv import load_dotenv
 
 # 1. Setup
@@ -15,8 +16,8 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-def generate(prompt: str, *, max_tokens: int = 500, temperature: float = 0.7):
-    """Call the HF Router using the Chat Completion standard."""
+async def generate(prompt: str, *, max_tokens: int = 500, temperature: float = 0.7):
+    """Call the HF Router using the Chat Completion standard (async)."""
     payload = {
         "model": MODEL,
         "messages": [
@@ -28,14 +29,18 @@ def generate(prompt: str, *, max_tokens: int = 500, temperature: float = 0.7):
     }
 
     try:
-        response = requests.post(API_URL, headers=HEADERS, json=payload)
-        
-        if response.status_code == 200:
-            result = response.json()
-            # Access the message content in the OpenAI-style response object
-            return result['choices'][0]['message']['content']
-        else:
-            return f"❌ Error {response.status_code}: {response.text}"
+        timeout = aiohttp.ClientTimeout(total=120)  # 2 minute timeout
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(API_URL, headers=HEADERS, json=payload) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    # Access the message content in the OpenAI-style response object
+                    return result['choices'][0]['message']['content']
+                else:
+                    text = await response.text()
+                    return f"❌ Error {response.status}: {text}"
 
+    except asyncio.TimeoutError:
+        return f"⚠️ Request timeout after 120 seconds"
     except Exception as e:
         return f"⚠️ Connection error: {str(e)}"

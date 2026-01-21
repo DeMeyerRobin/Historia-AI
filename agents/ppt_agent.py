@@ -84,6 +84,7 @@ async def ppt_agent():
                         
                     s_title = slide_info.get("title", "Topic")
                     s_bullets = slide_info.get("bullets", [])
+                    s_notes = slide_info.get("notes", "")
                     
                     slide = prs.slides.add_slide(bullet_slide_layout)
                     slide.shapes.title.text = str(s_title)
@@ -100,7 +101,13 @@ async def ppt_agent():
                         for b in s_bullets[1:]:
                             p = tf.add_paragraph()
                             p.text = str(b)
-                            p.level = 0 
+                            p.level = 0
+                    
+                    # Add notes to slide
+                    if s_notes:
+                        notes_slide = slide.notes_slide
+                        notes_text_frame = notes_slide.notes_text_frame
+                        notes_text_frame.text = str(s_notes) 
 
             elif legacy_bullets:
                 # LEGACY MODE: Put all bullets on one slide (or rudimentary split)

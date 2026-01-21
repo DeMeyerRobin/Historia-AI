@@ -87,7 +87,7 @@ Step: {step}
 
 Return only the answer, no extra text.
 """
-    result = generate(worker_prompt)
+    result = await generate(worker_prompt)
 
     print(f"[Worker] Result:\n{result}")
     await asyncio.sleep(0)

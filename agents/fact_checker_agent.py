@@ -72,5 +72,5 @@ TEXT TO CHECK:
 {text_to_check}
 """.strip()
 
-    result = generate(prompt)
+    result = await generate(prompt)
     return f"🛡️ Fact-Checker Result:\n{result}"

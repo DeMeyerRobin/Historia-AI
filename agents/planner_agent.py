@@ -199,6 +199,24 @@ EVIDENCE:
 """.strip()
 
 
+def _extract_notes_from_summary(teacher_summary: str, slides: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Extracts notes from the teacher summary by matching sections to slide titles.
+    Each slide gets the corresponding section from the summary as notes.
+    """
+    # Split summary into sections (paragraphs separated by double newlines)
+    sections = [s.strip() for s in teacher_summary.split('\n\n') if s.strip()]
+    
+    # Match slides to sections (assuming they're in order)
+    for i, slide in enumerate(slides):
+        if i < len(sections):
+            slide['notes'] = sections[i]
+        else:
+            slide['notes'] = ''
+    
+    return slides
+
+
 def _slide_generation_prompt(lesson_title: str, teacher_summary: str, target_slide_count: int, previous_slide_titles: List[str] = None) -> str:
     previous_context = ""
     if previous_slide_titles:
@@ -242,6 +260,7 @@ MANDATORY RULES:
 - Include specific dates, names, and locations in bullets
 - Focus on cause-effect relationships and historical significance
 - Maintain educational value appropriate for history teaching
+- Notes should contain the complete detailed text from the corresponding Teacher's Guide section
 
 TEACHER'S GUIDE:
 {teacher_summary}
@@ -310,7 +329,7 @@ async def _process_lesson(lesson_info: Dict[str, Any], unit_title: str, shared_c
     # 2. Write Teacher Summary (The Real Knowledge) - with context from previous lessons
     print(f"[Planner] Writing Teacher Guide for {full_lesson_name}...")
     previous_summaries = "\n\n---PREVIOUS LESSON---\n\n".join(shared_context["lesson_summaries"])
-    summary = generate(
+    summary = await generate(
         _teacher_summary_prompt(full_lesson_name, evidence, previous_summaries), 
         max_tokens=2000
     )
@@ -327,21 +346,25 @@ async def _process_lesson(lesson_info: Dict[str, Any], unit_title: str, shared_c
 
     # 4. Generate Slide Structure (Keywords only) - with context from previous slides
     print(f"[Planner] Designing slides for {full_lesson_name}...")
-    slides_json_str = generate(
+    slides_json_str = await generate(
         _slide_generation_prompt(
             full_lesson_name, 
             summary, 
             SLIDE_TARGET,
             shared_context["slide_titles"]
         ),
-        max_tokens=2500,  
+        max_tokens=4000,  
         temperature=0.3
     )
     slides_data = _safe_json_loads(slides_json_str)
     slides_list = slides_data.get("slides", [])
 
     if not slides_list:
-        slides_list = [{"title": "Error generating slides", "bullets": ["Check logs."]}]
+        print(f"[Planner] ERROR: Failed to generate slides. Raw output: {slides_json_str[:500]}...")
+        slides_list = [{"title": "Error generating slides", "bullets": ["Check logs."], "notes": "Slide generation failed."}]
+    else:
+        # Extract notes from Teacher's Guide and add to slides
+        slides_list = _extract_notes_from_summary(summary, slides_list)
     
     # Track slide titles
     for slide in slides_list:
@@ -390,7 +413,7 @@ Return JSON: {{"topic": "...", "num_lessons": 3}}
 Default num_lessons to 1 if not specified.
 """.strip()
     
-    intent_raw = generate(intent_prompt)
+    intent_raw = await generate(intent_prompt)
     intent = _safe_json_loads(intent_raw)
     topic = intent.get("topic", request)
     try:
@@ -401,7 +424,7 @@ Default num_lessons to 1 if not specified.
     print(f"[Planner] Plan: {num_lessons} lessons on '{topic}'")
 
     # 2. Planning
-    plan_raw = generate(_plan_lessons_prompt(topic, num_lessons))
+    plan_raw = await generate(_plan_lessons_prompt(topic, num_lessons))
     unit_plan = _safe_json_loads(plan_raw)
     
     unit_title = unit_plan.get("unit_title", topic)
