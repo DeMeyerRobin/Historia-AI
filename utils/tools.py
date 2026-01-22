@@ -1,5 +1,8 @@
 # utils/tools.py
 import requests
+import re
+from html import unescape
+from typing import Optional
 from urllib.parse import quote
 
 try:
@@ -11,6 +14,7 @@ except ImportError:  # pragma: no cover - optional dependency
 
 
 WIKIPEDIA_ARTICLE_CHAR_LIMIT = 4500
+BRITANNICA_BASE_URL = "https://www.britannica.com"
 
 def _clean_query(q: str) -> str:
     # Remove junk the planner may include, like <...> and question marks
@@ -30,6 +34,12 @@ def _truncate_article(text: str) -> str:
         truncated = truncated[:last_break]
     return truncated.strip() + "..."
 
+def _strip_html(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = re.sub(r"<[^>]+>", " ", text)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return unescape(cleaned).strip()
 
 def _fetch_full_article(query: str, sentences: int):
     if not wikipedia:
@@ -140,6 +150,88 @@ def wikipedia_summary(query: str, sentences: int = 3) -> str:
 
     except Exception as e:
         return f"[wiki] error: {type(e).__name__}: {e}"
+
+
+def _extract_britannica_article_url(html_text: str) -> Optional[str]:
+    if not html_text:
+        return None
+    patterns = [
+        r'href="(/topic/[^"#?]+)"',
+        r'href="(/event/[^"#?]+)"',
+        r'href="(/biography/[^"#?]+)"',
+        r'href="(/place/[^"#?]+)"',
+        r'href="(/science/[^"#?]+)"',
+        r'href="(/technology/[^"#?]+)"',
+        r'href="(/art/[^"#?]+)"',
+        r'href="(/animal/[^"#?]+)"',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, html_text)
+        if match:
+            return f"{BRITANNICA_BASE_URL}{match.group(1)}"
+    return None
+
+
+def _extract_britannica_summary(html_text: str, sentences: int) -> str:
+    if not html_text:
+        return ""
+    paragraph_match = re.search(r'<p class="topic-paragraph[^"]*">(.*?)</p>', html_text, re.DOTALL)
+    if paragraph_match:
+        raw_text = _strip_html(paragraph_match.group(1))
+    else:
+        desc_match = re.search(r'<meta name="description" content="([^"]+)"', html_text)
+        raw_text = _strip_html(desc_match.group(1)) if desc_match else ""
+
+    if not raw_text:
+        return ""
+    parts = [p.strip() for p in raw_text.split(". ") if p.strip()]
+    summary = ". ".join(parts[:sentences]).strip()
+    if summary and not summary.endswith("."):
+        summary += "."
+    return summary
+
+
+def britannica_summary(query: str, sentences: int = 3) -> str:
+    query_clean = _clean_query(query)
+    if not query_clean:
+        return "[britannica] Empty query."
+
+    headers = {
+        "User-Agent": "myfirstbot/1.0 (Discord demo bot)",
+        "Accept": "text/html",
+        "Accept-Language": "en",
+        "DNT": "1",
+    }
+
+    try:
+        search_url = f"{BRITANNICA_BASE_URL}/search?query={quote(query_clean)}"
+        search_response = requests.get(search_url, headers=headers, timeout=10)
+        if search_response.status_code != 200:
+            return f"[britannica] Search failed for '{query_clean}'."
+
+        article_url = _extract_britannica_article_url(search_response.text)
+        if not article_url:
+            return f"[britannica] No results for '{query_clean}'."
+
+        article_response = requests.get(article_url, headers=headers, timeout=10)
+        if article_response.status_code != 200:
+            return f"[britannica] Failed to retrieve article for '{query_clean}'."
+
+        title_match = re.search(r'<meta property="og:title" content="([^"]+)"', article_response.text)
+        title = _strip_html(title_match.group(1)) if title_match else query_clean
+
+        summary = _extract_britannica_summary(article_response.text, sentences)
+        if not summary:
+            return f"[britannica] Failed to retrieve summary for '{query_clean}'."
+
+        return (
+            f"📘 **Encyclopaedia Britannica Article Used:** {title}\n"
+            f"🔗 {article_url}\n\n"
+            f"🧾 **Summary:**\n{summary}"
+        )
+
+    except Exception as e:
+        return f"[britannica] error: {type(e).__name__}: {e}"
 
 
 

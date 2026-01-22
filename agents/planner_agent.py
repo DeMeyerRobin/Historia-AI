@@ -13,7 +13,7 @@ PURPOSE:
 FLOW:
 1. Receives validated history request from request_reviewer
 2. Creates lesson plan structure
-3. Coordinates research via Worker agent (Wikipedia)
+3. Coordinates research via Worker agent (Britannica by default, Wikipedia fallback)
 4. Generates detailed Teacher's Guide content
 5. Creates PowerPoint slide structures
 6. Dispatches to PPT agent for file generation
@@ -49,7 +49,8 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Config
 SLIDE_TARGET = 30
-MAX_WIKI_TOPICS = 5 
+MAX_WIKI_TOPICS = 5
+DEFAULT_RESEARCH_TOOL = "britannica"
 
 
 def _slugify_title(title: str) -> str:
@@ -136,7 +137,7 @@ Return STRICT JSON matching this schema:
     {{
       "lesson_number": 1,
       "title": "Concrete Topic Name",
-      "topics_to_research_on_wikipedia": ["Topic 1", "Topic 2"] 
+      "topics_to_research_on_britannica": ["Topic 1", "Topic 2"]
     }}
   ]
 }}
@@ -146,7 +147,7 @@ MANDATORY Requirements:
 - HISTORY-FOCUSED: All lessons must cover historical events, periods, figures, or movements
 - Lesson titles must be CONCRETE and FACTUAL (e.g. "The Storming of the Bastille", not "A Dream of Liberty")
 - Number the lessons sequentially
-- Topics must be suitable for Wikipedia research on historical subjects
+- Topics must be suitable for Encyclopaedia Britannica research on historical subjects
 - Maintain academic rigor appropriate for history education
 """.strip()
 
@@ -272,7 +273,11 @@ TEACHER'S GUIDE:
 #  WORKFLOW STEPS
 # -------------------------------------------------------------------------
 
-async def _gather_evidence(topics: List[str], evidence_cache: Dict[str, str]) -> str:
+async def _gather_evidence(
+    topics: List[str],
+    evidence_cache: Dict[str, str],
+    research_tool: str = DEFAULT_RESEARCH_TOOL,
+) -> str:
     """
     Gathers evidence for topics, using cache to avoid duplicate research.
     Updates the evidence_cache with newly researched topics.
@@ -298,7 +303,7 @@ async def _gather_evidence(topics: List[str], evidence_cache: Dict[str, str]) ->
             
         # Research if not cached
         print(f"[Planner] Researching: {topic}")
-        step_cmd = f"TOOL:wikipedia:{topic}"
+        step_cmd = f"TOOL:{research_tool}:{topic}"
         result = await worker_agent(step_cmd)
         
         # Store in cache
@@ -316,7 +321,9 @@ async def _process_lesson(lesson_info: Dict[str, Any], unit_title: str, shared_c
     """
     l_num = lesson_info.get("lesson_number", "?")
     l_title = lesson_info.get("title", "Untitled")
-    topics = lesson_info.get("topics_to_research_on_wikipedia", [])
+    topics = lesson_info.get("topics_to_research_on_britannica")
+    if topics is None:
+        topics = lesson_info.get("topics_to_research_on_wikipedia", [])
     
     # Concrete naming: "Lesson 1 - Topic Name"
     full_lesson_name = f"Lesson {l_num} - {l_title}"

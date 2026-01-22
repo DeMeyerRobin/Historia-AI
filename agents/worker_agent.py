@@ -11,6 +11,7 @@ PURPOSE:
 
 CAPABILITIES:
 1. Tool Execution:
+   - TOOL:britannica:<query> → Fetches Encyclopaedia Britannica summaries for historical research
    - TOOL:wikipedia:<query> → Fetches Wikipedia summaries for historical research
    - TOOL:factcheck:<claim>|||<evidence> → Validates claims against evidence
 
@@ -24,18 +25,20 @@ USAGE:
 - Returns results as strings for planner processing
 
 EXAMPLE TOOL CALLS:
+- "TOOL:britannica:French Revolution"
 - "TOOL:wikipedia:French Revolution"
 - "TOOL:factcheck:Louis XVI was executed in 1793|||Evidence text here"
 """
 
 from utils.llm import generate
-from utils.tools import wikipedia_summary, lightweight_factcheck
+from utils.tools import britannica_summary, wikipedia_summary, lightweight_factcheck
 import asyncio
 
 
 def _run_tool(step: str) -> str:
     """
     Tool call format:
+      TOOL:britannica:<query>
       TOOL:wikipedia:<query>
       TOOL:factcheck:<claim>|||<evidence>
 
@@ -44,6 +47,9 @@ def _run_tool(step: str) -> str:
         _, tool_name, payload = step.split(":", 2)
         tool_name = tool_name.strip().lower()
         payload = payload.strip()
+
+        if tool_name == "britannica":
+            return britannica_summary(payload)
 
         if tool_name == "wikipedia":
             return wikipedia_summary(payload)
