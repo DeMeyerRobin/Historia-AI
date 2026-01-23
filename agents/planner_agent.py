@@ -51,6 +51,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 SLIDE_TARGET = 30
 MAX_WIKI_TOPICS = 5
 DEFAULT_RESEARCH_TOOL = "britannica"
+FACT_CHECK_ENABLED = True  # Enable LLM-based fact checking
 
 
 def _slugify_title(title: str) -> str:
@@ -119,6 +120,53 @@ def create_docx(filename: str, title: str, summary_text: str):
         print(f"[Planner] Error writing DOCX: {e}")
         return False
 
+
+def create_sources_document(filename: str, unit_title: str, sources: List[Dict[str, str]]):
+    """Creates a sources document listing all research materials used."""
+    if not docx:
+        print("[Planner] python-docx not installed, skipping sources document.")
+        return False
+        
+    try:
+        doc = docx.Document()
+        doc.add_heading(f"Sources for: {unit_title}", 0)
+        
+        doc.add_paragraph(
+            "This document lists all sources consulted during the creation of this lesson unit. "
+            "All content was fact-checked against these sources using Natural Language Inference verification."
+        )
+        
+        doc.add_heading("Research Sources", level=1)
+        
+        # Group sources by lesson
+        current_lesson = None
+        for source in sources:
+            lesson = source.get("lesson", "Unknown Lesson")
+            if lesson != current_lesson:
+                doc.add_heading(lesson, level=2)
+                current_lesson = lesson
+            
+            source_type = source.get("type", "Article")
+            title = source.get("title", "Untitled")
+            url = source.get("url", "")
+            topic = source.get("topic", "")
+            
+            p = doc.add_paragraph(style='List Bullet')
+            p.add_run(f"{source_type}: ").bold = True
+            p.add_run(f"{title}")
+            if topic:
+                p.add_run(f" (Topic: {topic})")
+            if url:
+                p.add_run(f"\n   {url}")
+        
+        out_path = OUTPUT_DIR / filename
+        doc.save(out_path)
+        print(f"[Planner] Sources document saved: {out_path}")
+        return True
+    except Exception as e:
+        print(f"[Planner] Error creating sources document: {e}")
+        return False
+
 # -------------------------------------------------------------------------
 #  PROMPTS
 # -------------------------------------------------------------------------
@@ -147,8 +195,28 @@ MANDATORY Requirements:
 - HISTORY-FOCUSED: All lessons must cover historical events, periods, figures, or movements
 - Lesson titles must be CONCRETE and FACTUAL (e.g. "The Storming of the Bastille", not "A Dream of Liberty")
 - Number the lessons sequentially
-- Topics must be suitable for Encyclopaedia Britannica research on historical subjects
 - Maintain academic rigor appropriate for history education
+
+**CRITICAL: Research Topics MUST be SPECIFIC and ACCURATE:**
+- Include specific dates, event names, or proper nouns (e.g., "Korean War 1950-1953", NOT "Korean Peninsula")
+- Use exact names of treaties, battles, or events (e.g., "Battle of Inchon", NOT "Maoke Agreement")
+- Include the full context (e.g., "Cold War origins 1945-1950", NOT just "Cold War")
+- Verify that topics are real historical subjects that will have Britannica articles
+- For wars: include dates and key battles/events (e.g., "World War II D-Day invasion", "Korean War causes")
+- For people: use full names and roles (e.g., "Winston Churchill World War II", NOT just "Churchill")
+- AVOID vague geographic or period terms alone (e.g., NOT "Korean Peninsula", NOT "Industrial Age")
+
+Examples of GOOD research topics:
+- "Korean War 1950-1953"
+- "38th parallel Korea division"
+- "Inchon Landing September 1950"
+- "French Revolution storming of Bastille"
+- "Treaty of Versailles 1919"
+
+Examples of BAD research topics:
+- "Korean Peninsula" (too vague, will return ancient history)
+- "Cold War" (too broad, won't return specific events)
+- "Revolution period" (not specific enough)
 """.strip()
 
 
@@ -354,6 +422,36 @@ async def _process_lesson(lesson_info: Dict[str, Any], unit_title: str, shared_c
     evidence = await _gather_evidence(topics, shared_context["evidence_cache"])
     if not evidence.strip():
         evidence = "No specific evidence found."
+    
+    # Temporarily store source candidates (will validate after fact checking)
+    temp_sources = []
+    article_sections = re.split(r'--- article: (.+?) ---', evidence)
+    sources_seen = set()  # Track to avoid duplicates
+    
+    for i in range(1, len(article_sections), 2):
+        if i + 1 < len(article_sections):
+            topic_name = article_sections[i].strip()
+            article_content = article_sections[i + 1]
+            
+            # Extract title and URL from this specific article
+            title_match = re.search(r'\*\*(?:Encyclopaedia Britannica|Wikipedia) Article Used:\*\*\s*([^\n]+)', article_content)
+            url_match = re.search(r'🔗\s*(https?://[^\s]+)', article_content)
+            
+            source_title = title_match.group(1).strip() if title_match else topic_name
+            source_url = url_match.group(1) if url_match else ""
+            
+            # Create unique identifier to prevent duplicates
+            source_key = f"{source_title}|{source_url}"
+            
+            if source_key not in sources_seen:
+                sources_seen.add(source_key)
+                temp_sources.append({
+                    "lesson": full_lesson_name,
+                    "topic": topic_name,
+                    "type": "Encyclopaedia Britannica" if "britannica" in article_content.lower() else "Wikipedia",
+                    "title": source_title,
+                    "url": source_url
+                })
 
     # 2. Write Teacher Summary (The Real Knowledge) - with context from previous lessons
     print(f"[Planner] Writing Teacher Guide for {full_lesson_name}...")
@@ -362,6 +460,110 @@ async def _process_lesson(lesson_info: Dict[str, Any], unit_title: str, shared_c
         _teacher_summary_prompt(full_lesson_name, evidence, previous_summaries), 
         max_tokens=2000
     )
+    
+    # 2b. FACT CHECK the generated summary
+    irrelevant_sources = []
+    if FACT_CHECK_ENABLED:
+        print(f"[Planner] Fact-checking content for {full_lesson_name}...")
+        fact_check_result = await fact_checker_agent(summary, evidence)
+        print(fact_check_result)
+        
+        # Parse fact check result to identify irrelevant sources
+        if "Warnings:" in fact_check_result:
+            warnings_section = fact_check_result.split("Warnings:")[1] if "Warnings:" in fact_check_result else ""
+            # Look for mentions of specific article titles or topics in warnings
+            for source in temp_sources:
+                source_identifier = source["title"].split("|")[0].strip()  # Get first part of title
+                # Check if this source is mentioned as irrelevant in warnings
+                if source_identifier.lower() in warnings_section.lower() or \
+                   "unrelated" in warnings_section.lower() or \
+                   "not relevant" in warnings_section.lower():
+                    # Check if the source title appears in the warning
+                    for word in source_identifier.split():
+                        if len(word) > 4 and word.lower() in warnings_section.lower():
+                            irrelevant_sources.append(source["title"])
+                            print(f"[Planner] 🚫 Excluding irrelevant source: {source['title']}")
+                            break
+        
+        # Revision loop - keep trying until we get GO or hit max attempts
+        max_revision_attempts = 4
+        revision_attempt = 0
+        
+        while "GO/NO-GO: GO" not in fact_check_result and revision_attempt < max_revision_attempts:
+            # Check if there are actual warnings (not just "None")
+            has_warnings = "Warnings:" in fact_check_result and "None" not in fact_check_result.split("Warnings:")[1][:20]
+            is_no_go = "GO/NO-GO: NO-GO" in fact_check_result
+            
+            if not (is_no_go or has_warnings):
+                break  # No issues, exit loop
+            
+            revision_attempt += 1
+            print(f"[Planner] ⚠️ Content needs revision (attempt {revision_attempt}/{max_revision_attempts})...")
+            
+            # Create revision prompt with fact checker feedback
+            revision_prompt = f"""
+You are an expert history teacher revising educational content based on fact-checker feedback.
+
+**ORIGINAL LESSON:** {full_lesson_name}
+
+**FACT CHECKER FEEDBACK:**
+{fact_check_result}
+
+**AVAILABLE EVIDENCE (USE ONLY THIS):**
+{evidence}
+
+**YOUR TASK:**
+Rewrite the teacher's guide for this lesson, addressing ALL warnings from the fact checker.
+
+**CRITICAL RULES:**
+1. Use ONLY information from the provided evidence
+2. Remove or correct any unsupported claims mentioned in the warnings
+3. Do NOT include content about unrelated topics (e.g., ancient history when discussing modern events)
+4. Focus strictly on the lesson topic: {full_lesson_name}
+5. Maintain the 30-section structure for the 30-slide presentation
+6. Write in continuous paragraphs (NOT bullet points)
+7. Each section should be 3-5 sentences
+8. Ensure all facts are directly supported by the evidence provided
+
+Generate the revised teacher's guide now:
+""".strip()
+            
+            # Regenerate content with corrections
+            summary = await generate(revision_prompt, max_tokens=2000)
+            
+            # Re-check the revised content
+            print(f"[Planner] Re-checking revised content (attempt {revision_attempt})...")
+            fact_check_result = await fact_checker_agent(summary, evidence)
+            print(fact_check_result)
+        
+        # Final verdict after revision loop
+        if "GO/NO-GO: GO" in fact_check_result:
+            if revision_attempt > 0:
+                print(f"[Planner] ✅ Content verified after {revision_attempt} revision(s)!")
+                shared_context["fact_check_stats"].append({
+                    "lesson": full_lesson_name,
+                    "verdict": f"GO (revised {revision_attempt}x)",
+                    "details": fact_check_result
+                })
+            else:
+                print(f"[Planner] ✅ Content verified on first attempt")
+                shared_context["fact_check_stats"].append({
+                    "lesson": full_lesson_name,
+                    "verdict": "GO",
+                    "details": fact_check_result
+                })
+        else:
+            print(f"[Planner] ⚠️ Content still has issues after {revision_attempt} revision attempts, using best available version")
+            shared_context["fact_check_stats"].append({
+                "lesson": full_lesson_name,
+                "verdict": f"WARNING (tried {revision_attempt} revisions)",
+                "details": fact_check_result
+            })
+    
+    # Add only relevant sources to shared context
+    for source in temp_sources:
+        if source["title"] not in irrelevant_sources:
+            shared_context["sources"].append(source)
     
     # Add to shared context (keep last 2 lessons to avoid token overflow)
     shared_context["lesson_summaries"].append(f"{full_lesson_name}:\n{summary[:1000]}...")
@@ -484,7 +686,9 @@ Age should be between 14 and 18.
         "evidence_cache": {},  # Cache Wikipedia results
         "lesson_summaries": [],  # Track previous lesson content (truncated)
         "slide_titles": [],  # Track all slide titles to avoid duplicates
-        "full_summaries": []  # Full lesson summaries for quiz generation
+        "full_summaries": [],  # Full lesson summaries for quiz generation
+        "sources": [],  # Track all sources used
+        "fact_check_stats": []  # Track fact checking statistics
     }
 
     # 5. Execute Lessons with shared context
@@ -541,6 +745,50 @@ Age should be between 14 and 18.
     if quiz_path:
         output_lines.append(f"- Quiz")
         output_lines.append(f"  __FILE__:{str(quiz_path)}")
+    
+    # Generate sources document
+    if shared_context["sources"]:
+        sources_filename = f"sources_{_slugify_title(unit_title)}.docx"
+        if create_sources_document(sources_filename, unit_title, shared_context["sources"]):
+            sources_path = OUTPUT_DIR / sources_filename
+            output_lines.append(f"- Research Sources Document")
+            output_lines.append(f"  __FILE__:{str(sources_path)}")
+    
+    # Add fact check summary if enabled
+    if FACT_CHECK_ENABLED and shared_context["fact_check_stats"]:
+        output_lines.append("")
+        output_lines.append("**🛡️ Fact Checking Summary:**")
+        
+        # Count different verdict types
+        go_first_attempt = sum(1 for s in shared_context["fact_check_stats"] if s["verdict"] == "GO")
+        go_revised = sum(1 for s in shared_context["fact_check_stats"] if "revised" in s["verdict"].lower() and "GO" in s["verdict"])
+        warnings = sum(1 for s in shared_context["fact_check_stats"] if "WARNING" in s["verdict"])
+        
+        # Display summary
+        if go_first_attempt > 0:
+            output_lines.append(f"✅ {go_first_attempt} lesson(s) verified on first attempt")
+        if go_revised > 0:
+            output_lines.append(f"✅ {go_revised} lesson(s) revised and approved")
+        if warnings > 0:
+            output_lines.append(f"⚠️ {warnings} lesson(s) have warnings")
+        
+        # Show details for each lesson
+        output_lines.append("")
+        output_lines.append("**Details by lesson:**")
+        for stat in shared_context["fact_check_stats"]:
+            lesson_name = stat["lesson"].replace("Lesson ", "L")  # Shorten for readability
+            verdict = stat["verdict"]
+            
+            if verdict == "GO":
+                output_lines.append(f"  • {lesson_name}: ✅ Approved")
+            elif "revised" in verdict.lower() and "GO" in verdict:
+                # Extract revision count if present
+                import re
+                rev_match = re.search(r'revised (\d+)x', verdict)
+                rev_count = rev_match.group(1) if rev_match else "1"
+                output_lines.append(f"  • {lesson_name}: ✅ Revised {rev_count}x and approved")
+            else:
+                output_lines.append(f"  • {lesson_name}: ⚠️ {verdict}")
 
     return "\n".join(output_lines)
 

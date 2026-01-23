@@ -83,7 +83,7 @@ Return STRICT JSON:
 3. Questions must test understanding of the actual material taught
 4. Difficulty must be appropriate for {age}-year-old students
 5. Generate EXACTLY {num_questions} questions
-6. Each question must end with a question mark
+6. Use proper punctuation (question marks for questions or dots for statements)
 """.strip()
 
 
