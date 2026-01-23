@@ -24,19 +24,26 @@
             ↓ (delegates to)
 
 3️⃣  WORKER AGENT (worker_agent.py)
-    ├─ Executes: Wikipedia research
-    ├─ Runs: Fact-checking tools
-    └─ Returns: Data to Planner
+    ├─ Executes: Britannica + Wikipedia research
+    ├─ Smart retry: Detects irrelevant results
+    └─ Returns: Authoritative historical data
 
 4️⃣  FACT-CHECKER AGENT (fact_checker_agent.py)
-    ├─ Validates: Content accuracy
-    ├─ Compares: Generated text vs evidence
-    └─ Provides: GO/NO-GO verdict
+    ├─ Validates: Content accuracy vs evidence
+    ├─ Revises: Up to 4 attempts to fix issues
+    ├─ Filters: Removes irrelevant sources
+    └─ Reports: Verification status to user
 
 5️⃣  PPT AGENT (ppt_agent.py)
     ├─ Creates: PowerPoint files (.pptx)
-    ├─ Formats: Title + bullet slides
+    ├─ Formats: 28 content + 2 question slides
+    ├─ Adds: Speaker notes from guide
     └─ Saves: To outputs/ directory
+
+6️⃣  QUIZZER AGENT (quizzer_agent.py)
+    ├─ Generates: 10 age-appropriate questions
+    ├─ Adjusts: Difficulty by student age
+    └─ Creates: Quiz document (.docx)
 ```
 
 ---
@@ -85,8 +92,9 @@ User Types: "/task Create 3 lessons on the French Revolution"
 |------------|-------|--------|
 | **Input Validation** | Request Reviewer | Only history requests pass |
 | **Content Generation** | Planner | History-focused prompts |
-| **Accuracy Check** | Fact-Checker | Validates against evidence |
-| **Evidence Base** | Worker | Wikipedia historical sources |
+| **Accuracy Check** | Fact-Checker | Validates & revises (4x max) |
+| **Evidence Base** | Worker | Britannica + Wikipedia sources |
+| **Source Filtering** | Fact-Checker | Removes irrelevant references |
 
 ---
 

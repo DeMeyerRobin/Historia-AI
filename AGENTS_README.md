@@ -95,19 +95,28 @@ User receives files (DOCX + PPTX)
 **Role:** Task Executor / Tool Runner
 
 **Responsibilities:**
-- Executes research tasks (Wikipedia lookups)
+- Executes research tasks (Britannica + Wikipedia)
 - Runs fact-checking operations
 - Handles any LLM-based task steps
 - Serves as the "hands" of the Planner
 
 **Supported Tools:**
 ```python
-# Wikipedia research
+# Britannica research (primary source)
+"TOOL:britannica:Korean War 1950-1953"
+
+# Wikipedia research (fallback)
 "TOOL:wikipedia:French Revolution"
 
 # Fact-checking
 "TOOL:factcheck:Louis XVI was executed in 1793|||<evidence text>"
 ```
+
+**Smart Research Features:**
+- **Primary Source:** Encyclopaedia Britannica for authoritative content
+- **Relevance Checking:** Automatically detects when wrong article is found (e.g., ancient vs modern)
+- **Automatic Retry:** Tries alternative search queries (up to 2 retries) if irrelevant result
+- **Fallback:** Wikipedia available as backup source
 
 **Usage:**
 - Called by Planner for each step in the workflow
@@ -120,23 +129,31 @@ User receives files (DOCX + PPTX)
 **Role:** Quality Assurance / Accuracy Validator
 
 **Responsibilities:**
-- Validates generated content against source evidence
+- Validates generated content against Britannica/Wikipedia evidence
 - Ensures historical accuracy
 - Prevents hallucinations and unsupported claims
-- Provides corrections when needed
+- Triggers automatic content revision when issues found
+- Filters out irrelevant sources from bibliography
 
 **Output Format:**
 ```
 GO/NO-GO: <verdict>
 Confidence: <High|Medium|Low>
 Reason: <explanation>
-Corrected version: <if NO-GO>
+Warnings: <specific issues or "None">
 ```
 
-**Current Status:**
-- Integrated into the system
-- Can be used more extensively for content validation
-- Helps maintain educational quality standards
+**Revision Loop:**
+- **Maximum 4 attempts** to fix content issues
+- Automatically regenerates content based on fact-checker feedback
+- Keeps trying until GO verdict or attempts exhausted
+- Tracks revision history and includes in final report
+
+**Current Integration:**
+- ✅ **ENABLED** by default for all lessons
+- Runs after Teacher's Guide generation
+- Excludes irrelevant sources from sources document
+- Provides detailed feedback to user on verification status
 
 ---
 
@@ -147,16 +164,42 @@ Corrected version: <if NO-GO>
 - Converts slide structures into .pptx files
 - Saves presentations to `outputs/` directory
 - Operates asynchronously via message queue
-- Handles both new and legacy slide formats
+- Handles content slides AND thought-provoking questions
 
-**Slide Structure:**
+**Slide Structure (30 slides per lesson):**
 - **Slide 0:** Title slide (main title + subtitle)
-- **Slides 1-N:** Content slides (title + bullet points)
+- **Slides 1-28:** Content slides (title + bullet points + speaker notes)
+- **Slides 10 & 20:** 🤔 **Critical Thinking Questions** (1 question each)
+  - Makes students think logically
+  - Not necessarily answerable from content
+  - Example: "Why would coal and steel be the two important resources to focus on in the ECSC after WW2?"
 
-**File Naming:**
-- Automatically generates unique filenames
+**Features:**
+- Automatic unique filename generation
 - Based on lesson title with filesystem-safe slugs
-- Prevents overwriting existing files
+- Speaker notes extracted from Teacher's Guide
+- Special guidance notes for question slides
+
+---
+
+### 6. **Quizzer Agent** (`quizzer_agent.py`)
+**Role:** Assessment Generator
+
+**Responsibilities:**
+- Generates age-appropriate quiz questions based on lesson content
+- Creates questions answerable from the material taught
+- Adjusts difficulty level based on student age (14-18 years)
+- Produces 10 questions per unit
+
+**Age-Based Difficulty:**
+- **14 years:** Basic factual recall (names, dates, events)
+- **16 years:** Moderate comprehension and basic analysis
+- **18 years:** Analytical and critical thinking questions
+
+**Output:**
+- Saved as `quiz_<unit-title>.docx`
+- Formatted for educational assessment
+- Questions directly based on Teacher's Guide content
 
 ---
 
@@ -184,18 +227,26 @@ Corrected version: <if NO-GO>
    ```
 
 3. **For each lesson:**
-   - **Worker** researches topics on Wikipedia
+   - **Worker** researches topics on Britannica (with smart retry for relevance)
    - **Planner** generates Teacher's Guide (30 sections, continuous text)
-   - **Planner** creates slide structure (30 slides, keywords only)
-   - **PPT Agent** generates PowerPoint file
+   - **Fact-Checker** validates content (up to 4 revision attempts if needed)
+   - **Planner** creates slide structure (28 content + 2 question slides)
+   - **PPT Agent** generates PowerPoint file with notes
 
-4. **User receives:**
-   - `lesson-1-causes-of-the-revolution.docx`
-   - `lesson-1-causes-of-the-revolution.pptx`
+4. **After all lessons:**
+   - **Quizzer** generates age-appropriate quiz (10 questions)
+   - **Planner** creates sources document with all references
+
+5. **User receives:**
+   - `lesson-1-causes-of-the-revolution.docx` (Teacher's Guide)
+   - `lesson-1-causes-of-the-revolution.pptx` (30 slides + notes)
    - `lesson-2-the-reign-of-terror.docx`
    - `lesson-2-the-reign-of-terror.pptx`
    - `lesson-3-napoleons-rise-to-power.docx`
    - `lesson-3-napoleons-rise-to-power.pptx`
+   - `quiz_the-french-revolution.docx` (10 questions)
+   - `sources_the-french-revolution.docx` (Bibliography)
+   - **Fact-Check Report:** Shows which lessons were verified/revised
 
 ---
 
@@ -255,8 +306,10 @@ OPENAI_API_KEY=your_openai_api_key  # or other LLM provider
 
 ### Agent Settings (in `planner_agent.py`)
 ```python
-SLIDE_TARGET = 30        # Slides per presentation
-MAX_WIKI_TOPICS = 5      # Max Wikipedia topics per lesson
+SLIDE_TARGET = 30                # Slides per presentation (28 content + 2 questions)
+MAX_WIKI_TOPICS = 5              # Max research topics per lesson
+DEFAULT_RESEARCH_TOOL = "britannica"  # Primary research source
+FACT_CHECK_ENABLED = True        # Enable automatic fact checking
 ```
 
 ---
@@ -269,20 +322,30 @@ MAX_WIKI_TOPICS = 5      # Max Wikipedia topics per lesson
 - Prevents misuse and maintains focus
 
 ### 📚 Comprehensive Output
-- **Teacher's Guide:** Detailed, continuous text (30 sections)
-- **PowerPoint:** Structured slides with keywords (30 slides)
-- Both files saved to `outputs/` directory
+- **Teacher's Guide:** Detailed, continuous text (30 sections) with speaker notes
+- **PowerPoint:** 28 content slides + 2 critical thinking questions
+- **Quiz:** 10 age-appropriate assessment questions
+- **Sources Document:** Complete bibliography with all references
+- All files saved to `outputs/` directory
+
+### 🛡️ Automatic Fact Checking
+- **LLM-based verification** against Britannica/Wikipedia sources
+- **Revision loop:** Up to 4 attempts to fix inaccuracies
+- **Source filtering:** Removes irrelevant sources from bibliography
+- **User reporting:** Clear feedback on verification status
 
 ### 🔄 Context Awareness
 - Evidence caching prevents duplicate research
 - Tracks previous lesson content to avoid repetition
 - Maintains continuity across multi-lesson units
+- Smart research with relevance detection and retry
 
 ### 🎓 Educational Quality
-- Fact-checking ensures accuracy
-- Evidence-based content generation
-- Academic tone and structure
-- Specific dates, names, and locations
+- **Authoritative sources:** Encyclopaedia Britannica primary
+- **Fact-checked content:** Verified against evidence
+- **Critical thinking:** Thought-provoking questions in slides
+- **Age-appropriate:** Quiz difficulty scales with student age
+- Academic tone with specific dates, names, and locations
 
 ---
 
