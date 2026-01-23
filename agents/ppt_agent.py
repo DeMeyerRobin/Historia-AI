@@ -85,11 +85,12 @@ async def ppt_agent():
                     s_title = slide_info.get("title", "Topic")
                     s_bullets = slide_info.get("bullets", [])
                     s_notes = slide_info.get("notes", "")
+                    is_question = slide_info.get("is_question", False)
                     
                     slide = prs.slides.add_slide(bullet_slide_layout)
                     slide.shapes.title.text = str(s_title)
                     
-                    # Add bullets
+                    # Add bullets (with special handling for question slides)
                     if s_bullets:
                         tf = slide.placeholders[1].text_frame
                         tf.clear() # clear default placeholder Text
@@ -104,7 +105,17 @@ async def ppt_agent():
                             p.level = 0
                     
                     # Add notes to slide
-                    if s_notes:
+                    if is_question:
+                        # For question slides, add guidance for teachers in notes
+                        notes_text = "DISCUSSION QUESTION\n\nThis slide presents a critical thinking question for students. " + \
+                                   "Allow students time to discuss and reason through the question. " + \
+                                   "There may not be one 'correct' answer - focus on the reasoning process.\n\n"
+                        if s_notes:
+                            notes_text += "Context:\n" + str(s_notes)
+                        notes_slide = slide.notes_slide
+                        notes_text_frame = notes_slide.notes_text_frame
+                        notes_text_frame.text = notes_text
+                    elif s_notes:
                         notes_slide = slide.notes_slide
                         notes_text_frame = notes_slide.notes_text_frame
                         notes_text_frame.text = str(s_notes) 

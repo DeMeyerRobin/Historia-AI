@@ -242,7 +242,13 @@ The Teacher's Guide is organized into {target_slide_count} sections. Create ONE 
   "slides": [
     {{
       "title": "Slide Title",
-      "bullets": ["Keyword 1", "Keyword 2", "Short phrase"]
+      "bullets": ["Keyword 1", "Keyword 2", "Short phrase"],
+      "is_question": false
+    }},
+    {{
+      "title": "🤔 Think About It",
+      "bullets": ["Why would X be significant?", "What might have happened if Y?"],
+      "is_question": true
     }}
   ]
 }}
@@ -251,11 +257,25 @@ MANDATORY RULES:
 1. Extract the topic sentence from each section as the slide title
 2. Convert key facts from each section into 2-4 bullets
 3. Bullets MUST be keywords, dates, names, or short phrases (<= 6 words)
-4. NO complete sentences in bullets
+4. NO complete sentences in bullets (EXCEPT for question slides)
 5. Maintain the EXACT order of sections from the guide
 6. Slide titles must be concrete and factual (e.g., "Economic Crisis 1789")
 7. You MUST generate EXACTLY {target_slide_count} slides - no more, no less
 8. Ensure content is unique and does not duplicate previous lessons
+
+**QUESTION SLIDES - CRITICAL REQUIREMENT:**
+- Include EXACTLY 2 "question slides" in the lesson
+- Question slides MUST appear at positions 10 and 20 (after the 10th and 20th content slides)
+- For question slides:
+  * Set "is_question": true
+  * Use title: "🤔 Think About It" or "💭 Critical Thinking Question"
+  * Each question slide should have EXACTLY ONE thought-provoking question in the bullets
+  * Questions should make students think LOGICALLY and analytically
+  * Questions do NOT need to be directly answerable from the content presented so far
+  * Examples: "Why would coal and steel be the two important resources to focus on in the ECSC after WW2?"
+              "Why do you think the Treaty of Versailles led to further conflict?"
+              "Why do you think did the nations of Europe oppose the French Revolution?"
+  * Questions should encourage deeper historical thinking about causes, effects, and significance
 
 **HISTORY EDUCATION REQUIREMENTS:**
 - All slide content must be historically accurate and factual
@@ -263,6 +283,7 @@ MANDATORY RULES:
 - Focus on cause-effect relationships and historical significance
 - Maintain educational value appropriate for history teaching
 - Notes should contain the complete detailed text from the corresponding Teacher's Guide section
+- Question slides should relate to the surrounding content but challenge students to think beyond the facts
 
 TEACHER'S GUIDE:
 {teacher_summary}

@@ -1,4 +1,6 @@
 .env
 *.pptx
 *.docx
+*.pyc
+__pycache__/
 *.cpython-*.pyc

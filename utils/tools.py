@@ -191,6 +191,92 @@ def _extract_britannica_summary(html_text: str, sentences: int) -> str:
     return summary
 
 
+def _check_article_relevance(query: str, title: str, url: str, summary: str) -> bool:
+    """
+    Check if the article found is actually relevant to the query.
+    Returns True if relevant, False if it seems like the wrong article.
+    """
+    query_lower = query.lower()
+    title_lower = title.lower()
+    summary_lower = summary.lower()
+    
+    # Extract meaningful keywords from query (ignore common stopwords)
+    stopwords = {'the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'but', 'treaty', 'agreement'}
+    query_words = [w.strip('.,!?()[]') for w in query_lower.split()]
+    query_keywords = [w for w in query_words if w not in stopwords and len(w) > 2]
+    
+    if not query_keywords:
+        return True  # Can't determine, assume it's ok
+    
+    # Count how many query keywords appear in title or summary
+    matches = 0
+    for keyword in query_keywords:
+        if keyword in title_lower or keyword in summary_lower:
+            matches += 1
+    
+    # Consider it relevant if at least 50% of keywords match
+    relevance_threshold = len(query_keywords) * 0.5
+    
+    if matches >= relevance_threshold:
+        return True
+    
+    # Special case: Check if article is about a completely different geographic location or era
+    # For example, "Treaty of Lisbon" query but finding Portugal-Spain treaty instead of EU treaty
+    
+    # If query contains modern indicators but article only mentions old dates
+    modern_indicators = ['european union', 'eu ', ' eu', 'modern', 'contemporary', '19', '20']
+    has_modern_indicator = any(ind in query_lower for ind in modern_indicators)
+    
+    old_date_pattern = r'\b(14|15|16|17|18)\d{2}\b'
+    modern_date_pattern = r'\b(19|20)\d{2}\b'
+    
+    has_old_dates = bool(re.search(old_date_pattern, f"{title} {summary}"))
+    has_modern_dates = bool(re.search(modern_date_pattern, f"{title} {summary}"))
+    
+    # If query suggests modern content but article only has old dates, it's suspicious
+    if has_modern_indicator and has_old_dates and not has_modern_dates:
+        return False
+    
+    # Otherwise, if we have some keyword matches, consider it relevant
+    return matches > 0
+
+
+def _generate_alternative_queries(query: str) -> list:
+    """
+    Generate alternative phrasings of a query to help find the right article.
+    """
+    alternatives = []
+    
+    # Strategy 1: Reverse word order for "X of Y" patterns (e.g., "Treaty of Lisbon" → "Lisbon Treaty")
+    of_pattern = r'^(\w+(?:\s+\w+)?)\s+of\s+(.+)$'
+    match = re.match(of_pattern, query, re.IGNORECASE)
+    if match:
+        first_part = match.group(1)
+        second_part = match.group(2)
+        alternatives.append(f"{second_part} {first_part}")
+    
+    # Strategy 2: Add "European Union" context if query contains EU-related terms
+    eu_indicators = ['lisbon', 'maastricht', 'rome', 'amsterdam', 'nice']
+    if any(indicator in query.lower() for indicator in eu_indicators):
+        if 'european union' not in query.lower() and 'eu' not in query.lower():
+            alternatives.append(f"European Union {query}")
+            alternatives.append(f"EU {query}")
+    
+    # Strategy 3: Add "modern" or "contemporary" for treaties/agreements
+    if any(term in query.lower() for term in ['treaty', 'agreement', 'accord', 'convention']):
+        if not any(year in query for year in ['19', '20']):  # No modern year mentioned
+            alternatives.append(f"modern {query}")
+    
+    # Strategy 4: Remove "Treaty of" or "Agreement of" prefix
+    prefixes_to_remove = [r'^treaty of\s+', r'^agreement of\s+', r'^convention of\s+']
+    for prefix_pattern in prefixes_to_remove:
+        alt = re.sub(prefix_pattern, '', query, flags=re.IGNORECASE).strip()
+        if alt != query and alt:
+            alternatives.append(alt)
+    
+    return alternatives
+
+
 def britannica_summary(query: str, sentences: int = 3) -> str:
     query_clean = _clean_query(query)
     if not query_clean:
@@ -203,24 +289,68 @@ def britannica_summary(query: str, sentences: int = 3) -> str:
         "DNT": "1",
     }
 
-    try:
-        search_url = f"{BRITANNICA_BASE_URL}/search?query={quote(query_clean)}"
-        search_response = requests.get(search_url, headers=headers, timeout=10)
-        if search_response.status_code != 200:
-            return f"[britannica] Search failed for '{query_clean}'."
+    def attempt_search(search_query: str):
+        """Helper to perform a single search attempt."""
+        try:
+            search_url = f"{BRITANNICA_BASE_URL}/search?query={quote(search_query)}"
+            search_response = requests.get(search_url, headers=headers, timeout=10)
+            if search_response.status_code != 200:
+                return None, None, None, None
 
-        article_url = _extract_britannica_article_url(search_response.text)
+            article_url = _extract_britannica_article_url(search_response.text)
+            if not article_url:
+                return None, None, None, None
+
+            article_response = requests.get(article_url, headers=headers, timeout=10)
+            if article_response.status_code != 200:
+                return None, None, None, None
+
+            title_match = re.search(r'<meta property="og:title" content="([^"]+)"', article_response.text)
+            title = _strip_html(title_match.group(1)) if title_match else search_query
+
+            summary = _extract_britannica_summary(article_response.text, sentences)
+            
+            return article_url, title, summary, article_response.text
+        except Exception:
+            return None, None, None, None
+
+    try:
+        # First attempt with original query
+        article_url, title, summary, html = attempt_search(query_clean)
+        
+        # Check if result seems irrelevant to the query
+        if article_url and title and summary:
+            is_relevant = _check_article_relevance(query_clean, title, article_url, summary)
+            
+            if not is_relevant:
+                print(f"[britannica] Found '{title}' but it doesn't seem relevant to '{query_clean}'. Trying alternatives...")
+                
+                # Generate and try alternative queries (limit to 2 attempts)
+                alternatives = _generate_alternative_queries(query_clean)
+                max_retries = 2
+                retry_count = 0
+                
+                for alt_query in alternatives[:max_retries]:
+                    retry_count += 1
+                    print(f"[britannica] Retry {retry_count}/{max_retries}: Trying '{alt_query}'")
+                    alt_url, alt_title, alt_summary, alt_html = attempt_search(alt_query)
+                    
+                    if alt_url and alt_title and alt_summary:
+                        # Check if the alternative is more relevant
+                        if _check_article_relevance(query_clean, alt_title, alt_url, alt_summary):
+                            print(f"[britannica] Found better match: '{alt_title}'")
+                            article_url, title, summary = alt_url, alt_title, alt_summary
+                            break
+                        else:
+                            print(f"[britannica] Alternative '{alt_title}' also not very relevant...")
+                
+                # If we still don't have a good match after retries, use the original result anyway
+                if retry_count == max_retries:
+                    print(f"[britannica] Using original result '{title}' after {max_retries} retries")
+
         if not article_url:
             return f"[britannica] No results for '{query_clean}'."
-
-        article_response = requests.get(article_url, headers=headers, timeout=10)
-        if article_response.status_code != 200:
-            return f"[britannica] Failed to retrieve article for '{query_clean}'."
-
-        title_match = re.search(r'<meta property="og:title" content="([^"]+)"', article_response.text)
-        title = _strip_html(title_match.group(1)) if title_match else query_clean
-
-        summary = _extract_britannica_summary(article_response.text, sentences)
+        
         if not summary:
             return f"[britannica] Failed to retrieve summary for '{query_clean}'."
 
