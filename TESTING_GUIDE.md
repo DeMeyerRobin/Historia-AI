@@ -84,11 +84,14 @@ Synced X commands.
 **Expected Flow:**
 1. Bot responds: "🔍 Reviewing your request..."
 2. Bot responds: "✅ Request validated - Processing your history task..."
-3. Bot shows progress messages
-4. Bot delivers 6 files:
+3. Bot shows progress messages (research, fact-checking, revision if needed)
+4. Bot shows fact-check report with verification status and revision counts
+5. Bot delivers 8 files:
    - `lesson-1-*.docx` and `lesson-1-*.pptx`
    - `lesson-2-*.docx` and `lesson-2-*.pptx`
    - `lesson-3-*.docx` and `lesson-3-*.pptx`
+   - `quiz.docx` (10 age-appropriate questions)
+   - `sources.docx` (filtered bibliography)
 
 **What to Check:**
 - ✅ Request approved without rejection
@@ -96,7 +99,11 @@ Synced X commands.
 - ✅ Each lesson has both DOCX and PPTX
 - ✅ Files exist in `outputs/` directory
 - ✅ DOCX contains continuous text (30 sections)
-- ✅ PPTX contains 30 content slides + 1 title slide
+- ✅ PPTX contains 28 content slides + 2 question slides + 1 title slide
+- ✅ Question slides appear at positions 10 and 20
+- ✅ Quiz contains 10 questions with proper formatting
+- ✅ Sources document lists only relevant references
+- ✅ Fact-check report shows verification status (✅ Approved or 🔄 Revised)
 - ✅ Content is historically accurate
 
 ---
@@ -179,10 +186,12 @@ This request is about programming/computer science, not historical topics.
 
 **What to Check:**
 - ✅ System creates exactly 5 lessons
-- ✅ 10 files total (5 DOCX + 5 PPTX)
+- ✅ 12 files total (5 DOCX + 5 PPTX + 1 Quiz + 1 Sources)
 - ✅ Each lesson covers different aspects
 - ✅ No content repetition across lessons
 - ✅ Chronological or thematic progression
+- ✅ Quiz covers content from all 5 lessons
+- ✅ Sources document includes all relevant references used
 
 ---
 

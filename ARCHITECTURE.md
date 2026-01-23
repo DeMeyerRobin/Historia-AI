@@ -46,35 +46,42 @@
 ║  └─ Create unit plan structure                                            ║
 ║                                                                           ║
 ║  Phase 2: FOR EACH LESSON                                                 ║
-║  ├─ Research (via Worker Agent)                                           ║
+║  ├─ Research (via Worker Agent: Britannica → Wikipedia)                   ║
 ║  ├─ Generate Teacher's Guide (30 sections)                                ║
-║  ├─ Create slide structure (30 slides)                                    ║
+║  ├─ Fact-check content (up to 4 revision attempts)                        ║
+║  ├─ Filter irrelevant sources from bibliography                           ║
+║  ├─ Create slide structure (28 content + 2 question slides)               ║
 ║  └─ Dispatch to PPT Agent                                                 ║
 ║                                                                           ║
-║  Phase 3: DELIVERY                                                        ║
-║  └─ Return file paths to user                                             ║
+║  Phase 3: QUIZ GENERATION                                                 ║
+║  ├─ Send all lessons to Quizzer Agent                                     ║
+║  └─ Generate 10 age-appropriate questions                                 ║
+║                                                                           ║
+║  Phase 4: DELIVERY                                                        ║
+║  ├─ Report fact-check results to user                                     ║
+║  └─ Return file paths (guides, slides, quiz, sources)                     ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
-         │                    │                    │
-         │ Research           │ Validate           │ Generate
-         ▼                    ▼                    ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│  WORKER AGENT   │  │ FACT-CHECKER    │  │   PPT AGENT     │
-│  worker_agent   │  │ AGENT           │  │   ppt_agent     │
-│      .py        │  │ fact_checker_   │  │      .py        │
-│                 │  │   agent.py      │  │                 │
-│  Executes:      │  │                 │  │  Creates:       │
-│  • Wikipedia    │  │  Validates:     │  │  • .pptx files  │
-│    research     │  │  • Content vs   │  │  • Title slide  │
-│  • Fact-check   │  │    evidence     │  │  • 30 content   │
-│    tools        │  │  • Accuracy     │  │    slides       │
-│  • LLM tasks    │  │                 │  │                 │
-│                 │  │  Returns:       │  │  Saves to:      │
-│  Returns:       │  │  • GO/NO-GO     │  │  outputs/       │
-│  • Research     │  │  • Confidence   │  │                 │
-│    data         │  │  • Corrections  │  │                 │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-         │                    │                    │
-         └────────────────────┴────────────────────┘
+         │                    │                    │                    │
+         │ Research           │ Validate           │ Generate           │ Quiz
+         ▼                    ▼                    ▼                    ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│  WORKER AGENT   │  │ FACT-CHECKER    │  │   PPT AGENT     │  │  QUIZZER AGENT  │
+│  worker_agent   │  │ AGENT           │  │   ppt_agent     │  │  quizzer_agent  │
+│      .py        │  │ fact_checker_   │  │      .py        │  │      .py        │
+│                 │  │   agent.py      │  │                 │  │                 │
+│  Executes:      │  │                 │  │  Creates:       │  │  Generates:     │
+│  • Britannica   │  │  Validates:     │  │  • .pptx files  │  │  • 10 questions │
+│    research     │  │  • Content vs   │  │  • Title slide  │  │  • Age-scaled   │
+│  • Wikipedia    │  │    evidence     │  │  • 28 content   │  │    difficulty   │
+│    fallback     │  │  • Accuracy     │  │    slides       │  │  • DOCX format  │
+│  • Smart retry  │  │                 │  │  • 2 question   │  │                 │
+│                 │  │  Revision loop: │  │    slides       │  │  Saves to:      │
+│  Returns:       │  │  • Max 4 tries  │  │                 │  │  outputs/       │
+│  • Research     │  │  • GO/NO-GO     │  │  Saves to:      │  │  quiz.docx      │
+│    data         │  │  • Warnings     │  │  outputs/       │  │                 │
+└─────────────────┘  └─────────────────┘  └─────────────────┘  └─────────────────┘
+         │                    │                    │                    │
+         └────────────────────┴────────────────────┴────────────────────┘
                               │
                               ▼
               ┌───────────────────────────────┐
@@ -84,6 +91,8 @@
               │  • lesson-1-topic.pptx        │
               │  • lesson-2-topic.docx        │
               │  • lesson-2-topic.pptx        │
+              │  • quiz.docx                  │
+              │  • sources.docx               │
               │  • ...                        │
               └───────────────────────────────┘
                               │
@@ -127,10 +136,20 @@ Layer 2: PLANNER PROMPTS
 ├─ Method: Prompt engineering
 └─ Action: Guide content generation
 
-Layer 3: EVIDENCE-BASED
-├─ Checks: Content vs Wikipedia evidence
-├─ Method: Worker research + Fact-checker validation
-└─ Action: Ensure factual accuracy
+Layer 3: EVIDENCE-BASED RESEARCH
+├─ Checks: Britannica article relevance with smart retry
+├─ Method: Worker research with alternative queries
+└─ Action: Fall back to Wikipedia if needed
+
+Layer 4: FACT-CHECKING WITH REVISION
+├─ Checks: Content accuracy vs evidence
+├─ Method: Fact-checker validation with up to 4 revision attempts
+└─ Action: Regenerate content based on specific warnings
+
+Layer 5: SOURCE FILTERING
+├─ Checks: Relevance of cited sources
+├─ Method: Evidence tracking and filtering
+└─ Action: Remove irrelevant sources from bibliography
 ```
 
 ---
@@ -151,17 +170,25 @@ T=3s    Planner receives approved request
         └─ Result: 3 lessons structured
         ↓
 T=4s    FOR LESSON 1:
-        ├─ Worker researches on Wikipedia
+        ├─ Worker researches on Britannica (smart retry if needed)
         ├─ Planner writes Teacher's Guide (30 sections)
-        ├─ Planner designs slides (30 slides)
+        ├─ Fact-checker validates content (up to 4 revisions if needed)
+        ├─ Planner filters irrelevant sources from bibliography
+        ├─ Planner designs slides (28 content + 2 question slides)
         └─ PPT Agent creates .pptx file
         ↓
 T=60s   FOR LESSON 2: (repeat)
         ↓
 T=120s  FOR LESSON 3: (repeat)
         ↓
-T=180s  All files ready
-        └─ User receives 6 files (3 DOCX + 3 PPTX)
+T=180s  Quiz generation
+        ├─ Quizzer receives all lessons
+        ├─ Generates 10 age-appropriate questions
+        └─ Saves quiz.docx
+        ↓
+T=185s  All files ready
+        ├─ User receives fact-check report (revision counts)
+        └─ User downloads: 3 guides, 3 slides, 1 quiz, 1 sources (8 files)
 ```
 
 ---
@@ -188,17 +215,27 @@ T=180s  All files ready
 
 ### Pattern 2: Research (Worker Agent)
 ```
-┌─────────┐   TOOL:wikipedia:French Revolution    ┌────────┐
-│ Planner │ ─────────────────────────────────────>│ Worker │
-└─────────┘                                       └────────┘
-                                                      │
-                                              ┌───────┴────────┐
-                                              │ Wikipedia API  │
-                                              │ Fetch summary  │
-                                              └───────┬────────┘
-                                                      │
-┌─────────┐   Return: Historical evidence           │
-│ Planner │ <─────────────────────────────────────────┘
+┌─────────┐   TOOL:britannica:Lisbon Treaty    ┌────────┐
+│ Planner │ ─────────────────────────────────> │ Worker │
+└─────────┘                                    └────────┘
+                                                    │
+                                            ┌───────┴────────┐
+                                            │ Britannica API │
+                                            │ Check relevance│
+                                            └───────┬────────┘
+                                                    │
+                                          ┌─────────┴─────────┐
+                                          │                   │
+                                    ✅ Relevant         ❌ Irrelevant
+                                          │                   │
+                                   Return data        Retry with alt query
+                                                             │
+                                                      Max 2 attempts
+                                                             │
+                                                    Fall back to Wikipedia
+                                                             │
+┌─────────┐   Return: Historical evidence                    │
+│ Planner │ <────────────────────────────────────────────────┘
 └─────────┘
 ```
 
@@ -235,9 +272,10 @@ agentic_system/
 ├── agents/                          ← All agent logic
 │   ├── request_reviewer_agent.py   ← 🛡️ Validates history requests
 │   ├── planner_agent.py            ← 🎯 Orchestrates workflow
-│   ├── worker_agent.py             ← 🔧 Executes tasks
-│   ├── fact_checker_agent.py       ← ✅ Validates accuracy
-│   └── ppt_agent.py                ← 📄 Generates PowerPoints
+│   ├── worker_agent.py             ← 🔧 Executes tasks (Britannica + Wikipedia)
+│   ├── fact_checker_agent.py       ← ✅ Validates accuracy with revision loop
+│   ├── ppt_agent.py                ← 📄 Generates PowerPoints (28 + 2 question slides)
+│   └── quizzer_agent.py            ← 📝 Creates age-appropriate quizzes
 │
 ├── bot/                             ← Discord interface
 │   └── main.py                     ← Entry point, slash commands
@@ -247,12 +285,14 @@ agentic_system/
 │
 ├── utils/                           ← Shared utilities
 │   ├── llm.py                      ← LLM interface
-│   ├── tools.py                    ← Wikipedia, fact-check tools
+│   ├── tools.py                    ← Britannica, Wikipedia, fact-check tools
 │   └── logger.py                   ← Logging
 │
 ├── outputs/                         ← Generated files
 │   ├── lesson-1-topic.docx
 │   ├── lesson-1-topic.pptx
+│   ├── quiz.docx
+│   ├── sources.docx
 │   └── ...
 │
 └── Documentation/
@@ -281,8 +321,9 @@ agentic_system/
                   │
 ┌─────────────────────────────────────────┐
 │         SERVICES LAYER                  │
-│  • OpenAI/Anthropic API (LLM)           │
-│  • Wikipedia API (Research)             │
+│  • Hugging Face Router API (LLM)        │
+│  • Encyclopaedia Britannica (Primary)   │
+│  • Wikipedia API (Fallback)             │
 └─────────────────────────────────────────┘
                   │
 ┌─────────────────────────────────────────┐
@@ -321,10 +362,20 @@ agentic_system/
 - **How:** Request Reviewer uses LLM to assess intent
 - **Benefit:** Catches edge cases, user-friendly
 
-### 5. Evidence-Based Content
-- **Why:** Ensures factual accuracy
-- **How:** Wikipedia research + fact-checking
-- **Benefit:** Educational quality, trustworthy
+### 5. Evidence-Based Content with Smart Retry
+- **Why:** Ensures factual accuracy and relevance
+- **How:** Britannica primary research with relevance checking, automatic retry with alternative queries (max 2 attempts), Wikipedia fallback
+- **Benefit:** Authoritative sources, handles search failures gracefully
+
+### 6. Fact-Checking with Revision Loop
+- **Why:** Maintains content quality and accuracy
+- **How:** LLM-based fact-checking with up to 4 automatic revision attempts based on specific warnings
+- **Benefit:** High-quality content, transparent verification process
+
+### 7. Source Filtering
+- **Why:** Bibliography should only include relevant references
+- **How:** Track evidence usage during fact-checking, filter out irrelevant sources
+- **Benefit:** Clean bibliographies, professional documentation
 
 ---
 

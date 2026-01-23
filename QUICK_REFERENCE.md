@@ -107,6 +107,7 @@ User Types: "/task Create 3 lessons on the French Revolution"
 | Research & tools | `agents/worker_agent.py` |
 | Accuracy validation | `agents/fact_checker_agent.py` |
 | File generation | `agents/ppt_agent.py` |
+| Quiz generation | `agents/quizzer_agent.py` |
 | Discord interface | `bot/main.py` |
 | Generated files | `outputs/` |
 | Documentation | `AGENTS_README.md` |
@@ -157,13 +158,15 @@ User Types: "/task Create 3 lessons on the French Revolution"
 ```python
 # In planner_agent.py
 
-SLIDE_TARGET = 30         # Slides per presentation
-MAX_WIKI_TOPICS = 5       # Max Wikipedia lookups per lesson
+SLIDE_TARGET = 30                    # Slides per presentation (28 content + 2 questions)
+MAX_WIKI_TOPICS = 5                  # Max Wikipedia lookups per lesson
+FACT_CHECK_ENABLED = True            # Enable fact-checking with revision loop
+DEFAULT_RESEARCH_TOOL = "britannica" # Primary source (with Wikipedia fallback)
 
 # In .env file
 
 DISCORD_TOKEN=your_token
-OPENAI_API_KEY=your_key   # Or other LLM provider
+OPENAI_API_KEY=your_key   # Or other LLM provider (Hugging Face Router API recommended)
 ```
 
 ---
@@ -198,10 +201,11 @@ OPENAI_API_KEY=your_key   # Or other LLM provider
 | Agent | Input | Output | Purpose |
 |-------|-------|--------|---------|
 | **Request Reviewer** | User query | Approved/Rejected | Guardrail |
-| **Planner** | Approved query | DOCX + PPTX files | Orchestrator |
-| **Worker** | Research task | Wikipedia data | Tool executor |
-| **Fact-Checker** | Text + Evidence | Validation verdict | Quality assurance |
-| **PPT** | Slide structure | .pptx file | File generator |
+| **Planner** | Approved query | DOCX + PPTX + Quiz + Sources | Orchestrator |
+| **Worker** | Research task | Britannica/Wikipedia data | Tool executor |
+| **Fact-Checker** | Text + Evidence | GO/NO-GO + Warnings | Quality assurance |
+| **PPT** | Slide structure | .pptx file (with questions) | File generator |
+| **Quizzer** | All lessons | .docx quiz (10 questions) | Assessment creator |
 
 ---
 
@@ -216,14 +220,20 @@ OPENAI_API_KEY=your_key   # Or other LLM provider
    - Reinforced in all prompts (Planner)
 
 3. **Evidence-Based**
-   - All content backed by Wikipedia research
-   - Fact-checking validates accuracy
+   - Primary research from Encyclopaedia Britannica
+   - Wikipedia fallback for additional context
+   - Fact-checking validates accuracy with up to 4 revision attempts
 
-4. **Async Communication**
+4. **Quality Assurance**
+   - Smart search with relevance detection and retry
+   - Automatic revision loop fixes fact-checker warnings
+   - Source filtering removes irrelevant references
+
+5. **Async Communication**
    - Agents communicate via queues
    - Decoupled, scalable architecture
 
-5. **Clear Documentation**
+6. **Clear Documentation**
    - Each file has header explaining purpose
    - README provides system overview
    - This file gives quick reference
@@ -237,6 +247,8 @@ OPENAI_API_KEY=your_key   # Or other LLM provider
 | Request rejected | Make sure it's history-related |
 | No files generated | Check `outputs/` directory and logs |
 | Wikipedia errors | Topic may be too obscure/specific |
+| Britannica search fails | System will automatically retry with alternative queries, then fall back to Wikipedia |
+| Fact-checker rejects content | Content will be automatically revised up to 4 times with specific warnings |
 | Bot not responding | Check if agents started in `on_ready()` |
 | DOCX not created | Install: `pip install python-docx` |
 | PPTX not created | Install: `pip install python-pptx` |
