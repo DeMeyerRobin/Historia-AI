@@ -1,4 +1,4 @@
 .env
 *.pptx
 *.docx
-*.pyc
+*.cpython-*.pyc
