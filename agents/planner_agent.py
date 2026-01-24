@@ -340,10 +340,11 @@ MANDATORY RULES:
   * Each question slide should have EXACTLY ONE thought-provoking question in the bullets
   * Questions should make students think LOGICALLY and analytically
   * Questions do NOT need to be directly answerable from the content presented so far
-  * Examples: "Why would coal and steel be the two important resources to focus on in the ECSC after WW2?"
-              "Why do you think the Treaty of Versailles led to further conflict?"
-              "Why do you think did the nations of Europe oppose the French Revolution?"
+  * Example format: "Why would [two related elements from the lesson] be important in [context from lesson]?"
+  * Example format: "Why do you think [event from lesson] led to [consequence from lesson]?"
+  * Example format: "How might [group from lesson] have viewed [event from lesson]?"
   * Questions should encourage deeper historical thinking about causes, effects, and significance
+  * CRITICAL: Questions MUST relate to content from THIS lesson, not external examples
 
 **HISTORY EDUCATION REQUIREMENTS:**
 - All slide content must be historically accurate and factual
@@ -590,12 +591,31 @@ Generate the revised teacher's guide now:
         max_tokens=4000,  
         temperature=0.3
     )
-    slides_data = _safe_json_loads(slides_json_str)
-    slides_list = slides_data.get("slides", [])
+    
+    # Check if the response is an error message
+    if slides_json_str.startswith("❌") or slides_json_str.startswith("⚠️"):
+        print(f"[Planner] ERROR: LLM API failure - {slides_json_str[:200]}")
+        # Create fallback slides from the teacher's summary sections
+        print(f"[Planner] Creating fallback slides from teacher's guide...")
+        sections = [s.strip() for s in summary.split('\n\n') if s.strip()]
+        slides_list = []
+        for i, section in enumerate(sections[:SLIDE_TARGET]):
+            # Use first line as title, rest as content
+            lines = section.split('\n')
+            title = lines[0][:100] if lines else f"Topic {i+1}"
+            bullets = lines[1:] if len(lines) > 1 else [section[:200]]
+            slides_list.append({
+                "title": title,
+                "bullets": bullets[:5],  # Max 5 bullets
+                "notes": section
+            })
+    else:
+        slides_data = _safe_json_loads(slides_json_str)
+        slides_list = slides_data.get("slides", [])
 
     if not slides_list:
-        print(f"[Planner] ERROR: Failed to generate slides. Raw output: {slides_json_str[:500]}...")
-        slides_list = [{"title": "Error generating slides", "bullets": ["Check logs."], "notes": "Slide generation failed."}]
+        print(f"[Planner] ERROR: Failed to parse slides JSON. Raw output: {slides_json_str[:500]}...")
+        slides_list = [{"title": "Error generating slides", "bullets": ["API temporarily unavailable. Please try again."], "notes": "Slide generation failed due to API error."}]
     else:
         # Extract notes from Teacher's Guide and add to slides
         slides_list = _extract_notes_from_summary(summary, slides_list)

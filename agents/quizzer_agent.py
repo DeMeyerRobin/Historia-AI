@@ -41,18 +41,18 @@ def _quiz_generation_prompt(unit_title: str, lesson_summaries: str, age: int, nu
 - Mix of factual recall and basic comprehension
 - Some questions require explanation of concepts
 - Questions about key events and their immediate significance
-- Example: "What were the main goals of the European Coal and Steel Community?"
-- Example: "Why was the Treaty of Paris significant for European integration?"
-- Example: "Describe the structure established by the Merger Treaty."""
+- Example format: "What were the main goals of [specific event from lesson]?"
+- Example format: "Why was [specific treaty/event] significant?"
+- Example format: "Describe the impact of [specific event from lesson]."""
     else:  # 17-18
         difficulty_desc = "analytical and critical thinking"
         question_guidance = """
 - Analytical and critical thinking questions
 - Require explanation, comparison, or analysis
 - Questions about causes, effects, significance, connections
-- Example: "Explain the main differences between the ECSC and the EEC."
-- Example: "Analyze how economic cooperation led to political integration."
-- Example: "Compare the goals of the Maastricht Treaty with earlier European treaties."""
+- Example format: "Explain the main differences between [concept A] and [concept B] from the lesson."
+- Example format: "Analyze how [event A] influenced [event B]."
+- Example format: "Compare the goals of [two events/treaties from the lesson]."""
     
     return f"""
 You are an expert history teacher creating a quiz for {age}-year-old students who have completed a lesson unit.
@@ -80,10 +80,12 @@ Return STRICT JSON:
 **CRITICAL RULES:**
 1. All questions MUST be answerable using ONLY the lesson content provided above
 2. Do NOT ask about information not covered in the lessons
-3. Questions must test understanding of the actual material taught
-4. Difficulty must be appropriate for {age}-year-old students
-5. Generate EXACTLY {num_questions} questions
-6. Use proper punctuation (question marks for questions or dots for statements)
+3. Do NOT use example topics from the prompt - use topics from the ACTUAL lesson content
+4. Questions must test understanding of the actual material taught
+5. Difficulty must be appropriate for {age}-year-old students
+6. Generate EXACTLY {num_questions} questions
+7. Use proper punctuation (question marks for questions or dots for statements)
+8. VERIFY each question can be answered from the lesson content before including it
 """.strip()
 
 
